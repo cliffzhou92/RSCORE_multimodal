@@ -1,0 +1,121 @@
+---
+title: "RSCORE_Tutorials"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{RSCORE_Tutorials}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+source("R.SCORE.R")
+library(Seurat)
+library(igraph)
+library(R.utils)
+```
+Read the pbmc atac-seq data.
+```{r pretreatment}
+# change the directory to yours
+# You need to download the data firstly.
+# download.file('https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE81861&format=file&file=GSE81861%5FCell%5FLine%5FFPKM%2Ecsv%2Egz', destfile = 'RCA_FPKM.csv.gz')
+# gunzip('RCA_FPKM.csv.gz', 'RCA_FPKM.csv')
+
+pbmc <- readRDS('pbmc_atac.rds')
+```
+
+Run on the original RNA.
+
+```{r}
+DefaultAssay(pbmc)<-'RNA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 2000)
+pbmc <- ScaleData(object = pbmc)  
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "PCA",
+                     reduction.key = "PCA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "PCA", dims = 1:20,
+                        reduction.name = "UMAP",  reduction.key = "UMAP")
+DimPlot(pbmc, reduction = 'UMAP', pt.size = 3, group.by = 'orig.ident')
+
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3
+)
+```
+
+```{r}
+DefaultAssay(pbmc)<-'RNA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 5000)
+pbmc <- ScaleData(object = pbmc)  
+```
+
+PPI data is necessary too. You can provide the adjacent matrix of PPI network by yourself,
+```{r}
+# change the directory to yours 
+hs_network <- as.matrix(readRDS('9606_ppi_matrix_BioGRID-3.5.173.Rda'))
+```
+
+```{r, message=FALSE, warning=FALSE, fig.show='hide'}
+library(AUCell)
+library(doMC)
+pbmc <- R.SCORE(Data = pbmc, PPI = hs_network, AUCRank = 400, nCores = 8)
+
+```
+
+The result is saved in 'Net' assay of pbmc (it has been set as default assay).
+You can plot the tsne 
+```{r, fig.height=4, fig.width=6}
+VariableFeatures(pbmc) <- rownames(pbmc)
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "NetPCA",
+                     reduction.key = "NetPCA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "NetPCA", dims = 1:30,
+                        reduction.name = "NetUMAP",  reduction.key = "NetUMAP_")
+DimPlot(pbmc, reduction = 'NetUMAP', pt.size = 3, group.by = 'orig.ident')
+```
+
+
+```{r, fig.width=12, fig.height=5}
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3
+)
+```
+
+
+```{r, fig.height=5, fig.width=5}
+pbmc <- FindNeighbors(pbmc,reduction = 'NetPCA', dims = 1:30)
+pbmc <- FindClusters(pbmc, resolution = 0.3)
+DimPlot(pbmc, reduction = 'NetUMAP', pt.size = 3)
+
+```
+
+Heatmap of the marker genes and marker modules:
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=6}
+library(dplyr)
+SCORE_DEGs_list <- FindAllMarkers(object = pbmc, assay = 'RNA')
+
+SCORE_DAMs_list <- FindAllMarkers(object = pbmc, assay = 'Net')
+
+#Select the top n markers of each cluster
+top10_DEGs <- SCORE_DEGs_list %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+top10_DAMs <- SCORE_DAMs_list %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+```
+```{r}
+
+DoHeatmap(pbmc, features = top10_DEGs$gene,assay = 'RNA') + NoLegend()
+DoHeatmap(pbmc, features = top10_DAMs$gene,assay = 'Net') + NoLegend()
+```
+
+
+

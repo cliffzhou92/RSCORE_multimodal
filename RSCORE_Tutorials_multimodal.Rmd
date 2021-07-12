@@ -1,0 +1,277 @@
+---
+title: "RSCORE_Tutorials"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{RSCORE_Tutorials}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+source("R.SCORE.R")
+library(Seurat)
+library(igraph)
+library(R.utils)
+```
+Read the pbmc multi-modal data -- rna and ATAC gene activity.
+```{r}
+pbmc <- readRDS('pbmc_multi_modal.rds')
+```
+
+Run on the original RNA.
+```{r}
+DefaultAssay(pbmc)<-'RNA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 2000)
+pbmc <- ScaleData(object = pbmc)  
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "PCA",
+                     reduction.key = "PCA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "PCA", dims = 1:20,
+                        reduction.name = "UMAP",  reduction.key = "UMAP")
+DimPlot(pbmc, reduction = 'UMAP', pt.size = 3, group.by = 'orig.ident')
+
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3
+)
+```
+
+```{r}
+DefaultAssay(pbmc)<-'RNA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 8000)
+pbmc <- ScaleData(object = pbmc)  
+```
+
+Run RNA with PPI
+
+```{r}
+# change the directory to yours 
+hs_network <- as.matrix(readRDS('9606_ppi_matrix_BioGRID-3.5.173.Rda'))
+```
+
+```{r, message=FALSE, warning=FALSE, fig.show='hide'}
+library(AUCell)
+library(doMC)
+pbmc <- R.SCORE(Data = pbmc, PPI = hs_network, AUCRank = 200, nCores = 8)
+
+```
+
+```{r, fig.height=4, fig.width=6}
+VariableFeatures(pbmc) <- rownames(pbmc)
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "NetPCA",
+                     reduction.key = "NetPCA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "NetPCA", dims = 1:30,
+                        reduction.name = "NetUMAP",  reduction.key = "NetUMAP_")
+DimPlot(pbmc, reduction = 'NetUMAP', pt.size = 3, group.by = 'orig.ident')
+```
+
+
+```{r, fig.width=12, fig.height=5}
+DefaultAssay(pbmc)<-'RNA'
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3,
+  reduction = 'NetUMAP'
+)
+```
+
+## Analysis of the Gene Activity Assay
+
+```{r}
+DefaultAssay(pbmc)<-'GA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 2000)
+pbmc <- ScaleData(object = pbmc)  
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "PCA_GA",
+                     reduction.key = "PCA_GA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "PCA_GA", dims = 1:20,
+                        reduction.name = "UMAP_GA",  reduction.key = "UMAP_GA")
+DimPlot(pbmc, reduction = 'UMAP_GA', pt.size = 3, group.by = 'orig.ident')
+```
+
+```{r, fig.width=12, fig.height=5}
+DefaultAssay(pbmc)<-'RNA'
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3,
+  reduction = 'UMAP_GA'
+)
+```
+
+
+```{r}
+library(AUCell)
+library(doMC)
+DefaultAssay(pbmc)<-'GA'
+pbmc <- FindVariableFeatures(object = pbmc, selection.method = 'vst', nfeatures = 5000)
+pbmc <- ScaleData(object = pbmc)
+pbmc <- R.SCORE(Data = pbmc, PPI = hs_network, AUCRank = 400, nCores = 8, assay_input = 'GA', assay_output = 'Net_GA')
+```
+
+```{r}
+VariableFeatures(pbmc) <- rownames(pbmc)
+pbmc <- RunPCA(pbmc, features = rownames(pbmc), npcs = 30, reduction.name = "NetPCA_GA",
+                     reduction.key = "NetPCA_GA_", verbose = F)
+pbmc <- RunUMAP(pbmc, reduction = "NetPCA_GA", dims = 1:30,
+                        reduction.name = "NetUMAP_GA",  reduction.key = "NetUMAP_GA_")
+DimPlot(pbmc, reduction = 'NetUMAP_GA', pt.size = 3, group.by = 'orig.ident')
+```
+
+
+```{r, fig.width=12, fig.height=5}
+DefaultAssay(pbmc)<-'RNA'
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3,
+  reduction = 'NetUMAP_GA'
+)
+```
+
+
+## Joint Analysis
+
+Based on counts
+```{r}
+pbmc <- FindMultiModalNeighbors(
+  object = pbmc,
+  reduction.list = list("PCA", "PCA_GA"), 
+  dims.list = list(1:30, 1:30),
+  modality.weight.name = "RNA.weight",
+  weighted.nn.name = "weighted.nn.raw",
+  verbose = TRUE
+)
+
+# build a joint UMAP visualization
+pbmc <- RunUMAP(
+  object = pbmc,
+  nn.name = "weighted.nn.raw",
+  assay = "RNA",
+  verbose = TRUE
+)
+
+DimPlot(pbmc, reduction = "umap") + NoLegend()
+```
+```{r, fig.width=12, fig.height=5}
+DefaultAssay(pbmc)<-'RNA'
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3,
+  reduction = 'umap'
+)
+```
+
+
+
+Based on PPI module activity
+
+```{r}
+pbmc <- FindMultiModalNeighbors(
+  object = pbmc,
+  reduction.list = list("NetPCA", "NetPCA_GA"), 
+  dims.list = list(1:30, 1:30),
+  modality.weight.name = "RNA.weight",
+  snn.graph.name = "wsnn_net",
+  weighted.nn.name = "weighted.nn.net",
+  verbose = TRUE
+)
+
+# build a joint UMAP visualization
+pbmc <- RunUMAP(
+  object = pbmc,
+  nn.name = "weighted.nn.net",
+  assay = "RNA",
+  verbose = TRUE,
+  reduction.name ='umap_net' 
+)
+
+DimPlot(pbmc, reduction = "umap_net") + NoLegend()
+```
+
+```{r, fig.width=12, fig.height=5}
+DefaultAssay(pbmc)<-'RNA'
+FeaturePlot(
+  object = pbmc,
+  features = c('MS4A1', 'CD3D', 'LEF1', 'NKG7', 'TREM1', 'LYZ'),
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3,
+  reduction = 'umap_net'
+)
+```
+
+
+```{r}
+pbmc <- FindClusters(pbmc, graph.name = "wsnn_net",resolution = 0.05)
+DimPlot(pbmc, reduction = 'umap_net', pt.size = 3)
+```
+
+Heatmap of the marker genes and marker modules in RNA:
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=6}
+library(dplyr)
+library(genesorteR)
+source("Find_Markers.R")
+SCORE_DEGs_list <- Find_Markers(object = pbmc, assay = 'RNA', FoldChange = 1.5)
+
+SCORE_DAMs_list <- Find_Markers(object = pbmc, assay = 'Net', FoldChange = 1.5)
+
+#Select the top n markers of each cluster
+top10_DEGs <- SCORE_DEGs_list$Markers %>% group_by(Cluster) %>% top_n(n = 10, wt = Gene.Score)
+top10_DAMs <- SCORE_DAMs_list$Markers %>% group_by(Cluster) %>% top_n(n = 10, wt = Gene.Score)
+
+plotMarkerHeat(exp = SCORE_DEGs_list$GeneSort$inputMat,
+               classes = SCORE_DEGs_list$GeneSort$inputClass,
+               markers = top10_DEGs$Marker,
+               clusterGenes = FALSE,
+               averageCells = 1)
+
+plotMarkerHeat(exp = SCORE_DAMs_list$GeneSort$inputMat,
+               classes = SCORE_DAMs_list$GeneSort$inputClass,
+               markers = top10_DAMs$Marker,
+               clusterGenes = FALSE,
+               averageCells = 1)
+
+```
+
+Heatmap of the marker genes and marker modules in Gene Activity:
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=6}
+SCORE_DEGs_list <- Find_Markers(object = pbmc, assay = 'GA', FoldChange = 1.5)
+
+SCORE_DAMs_list <- Find_Markers(object = pbmc, assay = 'Net_GA', FoldChange = 1.5)
+
+#Select the top n markers of each cluster
+top10_DEGs <- SCORE_DEGs_list$Markers %>% group_by(Cluster) %>% top_n(n = 10, wt = Gene.Score)
+top10_DAMs <- SCORE_DAMs_list$Markers %>% group_by(Cluster) %>% top_n(n = 10, wt = Gene.Score)
+
+plotMarkerHeat(exp = SCORE_DEGs_list$GeneSort$inputMat,
+               classes = SCORE_DEGs_list$GeneSort$inputClass,
+               markers = top10_DEGs$Marker,
+               clusterGenes = FALSE,
+               averageCells = 1)
+
+plotMarkerHeat(exp = SCORE_DAMs_list$GeneSort$inputMat,
+               classes = SCORE_DAMs_list$GeneSort$inputClass,
+               markers = top10_DAMs$Marker,
+               clusterGenes = FALSE,
+               averageCells = 1)
+
+```
